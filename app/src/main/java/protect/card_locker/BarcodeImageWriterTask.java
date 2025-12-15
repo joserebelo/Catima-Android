@@ -10,10 +10,6 @@ import android.view.View;
 import android.widget.ImageView;
 import android.widget.TextView;
 
-import com.google.zxing.MultiFormatWriter;
-import com.google.zxing.WriterException;
-import com.google.zxing.common.BitMatrix;
-
 import java.lang.ref.WeakReference;
 
 import protect.card_locker.async.CompatCallable;
@@ -41,6 +37,7 @@ public class BarcodeImageWriterTask implements CompatCallable<Bitmap> {
     private final CatimaBarcode format;
     private final int imageHeight;
     private final int imageWidth;
+    private final BarcodeImageRenderer barcodeImageRenderer;
     private final int imagePadding;
     private final boolean widthPadding;
     private final boolean showFallback;
@@ -96,143 +93,51 @@ public class BarcodeImageWriterTask implements CompatCallable<Bitmap> {
             imageHeight = (int) (imageViewHeight * ratio);
         }
 
+        this.barcodeImageRenderer = new BarcodeImageRenderer(format, imageHeight, imageWidth);
         this.showFallback = showFallback;
     }
 
     private int getMaxWidth(CatimaBarcode format) {
-        switch (format.format()) {
+        return switch (format.format()) {
             // 2D barcodes
-            case AZTEC:
-            case MAXICODE:
-            case PDF_417:
-            case QR_CODE:
-                return MAX_WIDTH_2D;
+            case AZTEC, MAXICODE, PDF_417, QR_CODE -> MAX_WIDTH_2D;
 
             // 2D but rectangular versions get blurry otherwise
-            case DATA_MATRIX:
-                return MAX_WIDTH_1D;
+            case DATA_MATRIX -> MAX_WIDTH_1D;
 
             // 1D barcodes:
-            case CODABAR:
-            case CODE_39:
-            case CODE_93:
-            case CODE_128:
-            case EAN_8:
-            case EAN_13:
-            case ITF:
-            case UPC_A:
-            case UPC_E:
-            case RSS_14:
-            case RSS_EXPANDED:
-            case UPC_EAN_EXTENSION:
-            default:
-                return MAX_WIDTH_1D;
-        }
+            case CODABAR, CODE_39, CODE_93, CODE_128, EAN_8, EAN_13, ITF, UPC_A, UPC_E,
+                 RSS_14, RSS_EXPANDED, UPC_EAN_EXTENSION -> MAX_WIDTH_1D;
+        };
     }
 
     private String getFallbackString(CatimaBarcode format) {
-        switch (format.format()) {
+        return switch (format.format()) {
             // 2D barcodes
-            case AZTEC:
-                return "AZTEC";
-            case DATA_MATRIX:
-                return "DATA_MATRIX";
-            case PDF_417:
-                return "PDF_417";
-            case QR_CODE:
-                return "QR_CODE";
+            case AZTEC -> "AZTEC";
+            case DATA_MATRIX -> "DATA_MATRIX";
+            case PDF_417 -> "PDF_417";
+            case QR_CODE -> "QR_CODE";
 
             // 1D barcodes:
-            case CODABAR:
-                return "C0C";
-            case CODE_39:
-                return "CODE_39";
-            case CODE_93:
-                return "CODE_93";
-            case CODE_128:
-                return "CODE_128";
-            case EAN_8:
-                return "32123456";
-            case EAN_13:
-                return "5901234123457";
-            case ITF:
-                return "1003";
-            case UPC_A:
-                return "123456789012";
-            case UPC_E:
-                return "0123456";
-            default:
-                throw new IllegalArgumentException("No fallback known for this barcode type");
-        }
-    }
+            case CODABAR -> "C0C";
+            case CODE_39 -> "CODE_39";
+            case CODE_93 -> "CODE_93";
+            case CODE_128 -> "CODE_128";
+            case EAN_8 -> "32123456";
+            case EAN_13 -> "5901234123457";
+            case ITF -> "1003";
+            case UPC_A -> "123456789012";
+            case UPC_E -> "0123456";
 
-    private Bitmap generate() {
-        if (cardId.isEmpty()) {
-            return null;
-        }
-
-        MultiFormatWriter writer = new MultiFormatWriter();
-        BitMatrix bitMatrix;
-        try {
-            try {
-                bitMatrix = writer.encode(cardId, format.format(), imageWidth, imageHeight, null);
-            } catch (Exception e) {
-                // Cast a wider net here and catch any exception, as there are some
-                // cases where an encoder may fail if the data is invalid for the
-                // barcode type. If this happens, we want to fail gracefully.
-                throw new WriterException(e);
-            }
-
-            final int WHITE = 0xFFFFFFFF;
-            final int BLACK = 0xFF000000;
-
-            int bitMatrixWidth = bitMatrix.getWidth();
-            int bitMatrixHeight = bitMatrix.getHeight();
-
-            int[] pixels = new int[bitMatrixWidth * bitMatrixHeight];
-
-            for (int y = 0; y < bitMatrixHeight; y++) {
-                int offset = y * bitMatrixWidth;
-                for (int x = 0; x < bitMatrixWidth; x++) {
-                    int color = bitMatrix.get(x, y) ? BLACK : WHITE;
-                    pixels[offset + x] = color;
-                }
-            }
-            Bitmap bitmap = Bitmap.createBitmap(bitMatrixWidth, bitMatrixHeight,
-                    Bitmap.Config.ARGB_8888);
-            bitmap.setPixels(pixels, 0, bitMatrixWidth, 0, 0, bitMatrixWidth, bitMatrixHeight);
-
-            // Determine if the image needs to be scaled.
-            // This is necessary because the datamatrix barcode generator
-            // ignores the requested size and returns the smallest image necessary
-            // to represent the barcode. If we let the ImageView scale the image
-            // it will use bi-linear filtering, which results in a blurry barcode.
-            // To avoid this, if scaling is needed do so without filtering.
-
-            int heightScale = imageHeight / bitMatrixHeight;
-            int widthScale = imageWidth / bitMatrixHeight;
-            int scalingFactor = Math.min(heightScale, widthScale);
-
-            if (scalingFactor > 1) {
-                bitmap = Bitmap.createScaledBitmap(bitmap, bitMatrixWidth * scalingFactor, bitMatrixHeight * scalingFactor, false);
-            }
-
-            return bitmap;
-        } catch (WriterException e) {
-            Log.e(TAG, "Failed to generate barcode of type " + format + ": " + cardId, e);
-        } catch (OutOfMemoryError e) {
-            Log.w(TAG, "Insufficient memory to render barcode, "
-                    + imageWidth + "x" + imageHeight + ", " + format.name()
-                    + ", length=" + cardId.length(), e);
-        }
-
-        return null;
+            default -> throw new IllegalArgumentException("No fallback known for this barcode type");
+        };
     }
 
     public Bitmap doInBackground(Void... params) {
         // Only do the hard tasks if we've not already been cancelled
         if (!Thread.currentThread().isInterrupted()) {
-            Bitmap bitmap = generate();
+            Bitmap bitmap = barcodeImageRenderer.generate(cardId);
 
             if (bitmap == null) {
                 isSuccesful = false;
@@ -240,7 +145,7 @@ public class BarcodeImageWriterTask implements CompatCallable<Bitmap> {
                 if (showFallback && !Thread.currentThread().isInterrupted()) {
                     Log.i(TAG, "Barcode generation failed, generating fallback...");
                     cardId = getFallbackString(format);
-                    bitmap = generate();
+                    bitmap = barcodeImageRenderer.generate(cardId);
                     return bitmap;
                 }
             } else {
